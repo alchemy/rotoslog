@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	h, err := flor.NewFlorHandler(flor.WithFilePrefix("msg-"))
+	h, err := rotoslog.NewHandler(rotoslog.WithFilePrefix("msg-"))
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +52,7 @@ func init() {
 		textHandler := NewTextHandler(w, opts)
 		return formattingMiddleware(textHandler)
 	}
-	h, err := NewHandler(WithHandlerBuilder(builder))
+	h, err := rotoslog.NewHandler(rotoslog.WithHandlerBuilder(builder))
 	if err != nil {
 		panic(err)
 	}
