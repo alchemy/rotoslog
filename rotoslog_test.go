@@ -1,3 +1,7 @@
+// Copyright 2023 Filippo Veneri. All rights reserved.
+// Use of this source code is governed by the MIT
+// license that can be found in the LICENSE file.
+
 package rotoslog
 
 import (
@@ -11,7 +15,7 @@ import (
 
 func init() {
 	os.RemoveAll(defaultConfig.logDir)
-	h, err := NewHandler(WithMaxRotatedFiles(4))
+	h, err := NewHandler(MaxRotatedFiles(4))
 	if err != nil {
 		panic(err)
 	}

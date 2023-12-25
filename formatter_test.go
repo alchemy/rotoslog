@@ -1,3 +1,7 @@
+// Copyright 2023 Filippo Veneri. All rights reserved.
+// Use of this source code is governed by the MIT
+// license that can be found in the LICENSE file.
+
 package rotoslog
 
 import (
@@ -23,7 +27,7 @@ func setup() {
 		textHandler := NewTextHandler(w, opts)
 		return formattingMiddleware(textHandler)
 	}
-	h, err := NewHandler(WithHandlerBuilder(builder))
+	h, err := NewHandler(LogHandlerBuilder(builder))
 	if err != nil {
 		panic(err)
 	}

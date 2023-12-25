@@ -1,3 +1,20 @@
+// Copyright 2023 Filippo Veneri. All rights reserved.
+// Use of this source code is governed by the MIT
+// license that can be found in the LICENSE file.
+
+/*
+Package rotoslog provides a [slog.Handler] implementation that writes to a rotating set of files.
+Log file names have the following structure: <prefix>(<suffix>|<timestamp>)<extension>.
+When creating a new handler the user can set various options:
+  - LogDir: directory where log files are created (default "log")
+  - FilePrefix: file name <prefix> (default: "")
+  - CurrentFileSuffix: current file name <suffix>
+  - DateTimeFormat: timestamp format (default: "20060102150405")
+  - MaxFileSize: size threshold that triggers rotation (default: 32M)
+  - MaxRotatedFiles: number of rotated files to keep (default: 8)
+  - HandlerOptions: slog.HandlerOptions (default: zero value)
+  - LogHandlerBuilder: a function that can build a slog.Handler used for formatting log data (default: [NewJSONHandler])
+*/
 package rotoslog
 
 import (
@@ -29,7 +46,7 @@ type config struct {
 	filePrefix        string
 	currentFileSuffix string
 	fileExtension     string
-	dateTimeFormat    string
+	dateTimeLayout    string
 	maxFileSize       uint64
 	maxRotatedFiles   uint64
 	handlerOptions    slog.HandlerOptions
@@ -42,7 +59,7 @@ func (cnf *config) currentFileName() string {
 }
 
 func (cnf *config) rotatedFileName(modTime time.Time) string {
-	dateTimeStr := modTime.Format(cnf.dateTimeFormat)
+	dateTimeStr := modTime.Format(cnf.dateTimeLayout)
 	return cnf.filePrefix + dateTimeStr + cnf.fileExtension
 }
 
@@ -66,7 +83,7 @@ var defaultConfig = config{
 	filePrefix:        DEFAULT_FILE_NAME_PREFIX,
 	currentFileSuffix: DEFAULT_CURRENT_FILE_SUFFIX,
 	fileExtension:     DEFAULT_FILE_EXTENSION,
-	dateTimeFormat:    DEFAULT_FILE_DATE_FORMAT,
+	dateTimeLayout:    DEFAULT_FILE_DATE_FORMAT,
 	maxFileSize:       DEFAULT_MAX_FILE_SIZE,
 	maxRotatedFiles:   DEFAULT_MAX_ROTATED_FILES,
 	handlerOptions:    slog.HandlerOptions{},
@@ -75,59 +92,72 @@ var defaultConfig = config{
 
 type optFun func(*config)
 
-func WithLogDir(dir string) optFun {
+// LogDir sets the path to the logging directory
+func LogDir(dir string) optFun {
 	return func(cnf *config) {
 		cnf.logDir = dir
 	}
 }
 
-func WithFilePrefix(prefix string) optFun {
+// FilePrefix sets the logging file prefix.
+func FilePrefix(prefix string) optFun {
 	return func(cnf *config) {
 		cnf.filePrefix = prefix
 	}
 }
 
-func WithCurrentFileSuffix(suffix string) optFun {
+// CurrentFileSuffix sets the current logging file suffix.
+func CurrentFileSuffix(suffix string) optFun {
 	return func(cnf *config) {
 		cnf.currentFileSuffix = suffix
 	}
 }
 
-func WithDateTimeFormat(format string) optFun {
+// DateTimeLayout sets the timestamp layout used in rotated file names.
+func DateTimeLayout(layout string) optFun {
 	return func(cnf *config) {
-		cnf.dateTimeFormat = format
+		cnf.dateTimeLayout = layout
 	}
 }
 
-func WithMaxFileSize(size uint64) optFun {
+// MaxFileSize sets the size threshold that triggers file rotation.
+func MaxFileSize(size uint64) optFun {
 	return func(cnf *config) {
 		cnf.maxFileSize = size
 	}
 }
 
-func WithMaxRotatedFiles(n uint64) optFun {
+// MaxRotatedFiles sets the maximum number of rotated files.
+// When this number is exceeded the oldest rotated fle is deleted.
+func MaxRotatedFiles(n uint64) optFun {
 	return func(cnf *config) {
 		cnf.maxRotatedFiles = n
 	}
 }
 
-func WithHandlerOptions(opts slog.HandlerOptions) optFun {
+// HandlerOptions sets the slog.HandlerOptions for the handler.
+func HandlerOptions(opts slog.HandlerOptions) optFun {
 	return func(cnf *config) {
 		cnf.handlerOptions = opts
 	}
 }
 
+// HandlerBuilder is a type representing functions used to create
+// handlers to control formatting of logging data.
 type HandlerBuilder func(w io.Writer, opts *slog.HandlerOptions) slog.Handler
 
+// NewJSONHandler is a HandlerBuilder that creates a slog.JSONHandler.
 func NewJSONHandler(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
 	return slog.NewJSONHandler(w, opts)
 }
 
+// NewTestHandler is a HandlerBuilder that creates a slog.TextHandler.
 func NewTextHandler(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
 	return slog.NewTextHandler(w, opts)
 }
 
-func WithHandlerBuilder(builder HandlerBuilder) optFun {
+// LogHandlerBuilder sets the HandlerBuilder used for formatting.
+func LogHandlerBuilder(builder HandlerBuilder) optFun {
 	return func(cnf *config) {
 		cnf.builder = builder
 	}
@@ -140,6 +170,7 @@ type handler struct {
 	mu        *sync.Mutex
 }
 
+// NewHandler creates a new handler with the given options.
 func NewHandler(options ...optFun) (slog.Handler, error) {
 	h := handler{
 		cnf: defaultConfig,
@@ -178,10 +209,13 @@ func (h *handler) openLogFile() error {
 	return nil
 }
 
+// Enabled implements the method of the slog.Handler interface
+// by calling the same method of the formatter habdler.
 func (h handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.formatter.Enabled(ctx, level)
 }
 
+// Handle implements the method of the slog.Handler interface.
 func (h handler) Handle(ctx context.Context, r slog.Record) error {
 	if !h.Enabled(ctx, r.Level) {
 		return nil
@@ -273,12 +307,18 @@ func (h handler) clone() *handler {
 	}
 }
 
+// WithAttrs implements the method of the slog.Handler interface by
+// cloning the current handler and calling the WithAttrs of the
+// formatter handler.
 func (h handler) WithAttrs(attr []slog.Attr) slog.Handler {
 	nh := h.clone()
 	nh.formatter = h.formatter.WithAttrs(attr)
 	return nh
 }
 
+// WithGroup implements the method of the slog.Handler interface by
+// cloning the current handler and calling the WithGroup of the
+// formatter handler.
 func (h handler) WithGroup(name string) slog.Handler {
 	nh := h.clone()
 	nh.formatter = h.formatter.WithGroup(name)
