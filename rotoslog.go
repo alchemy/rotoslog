@@ -6,9 +6,9 @@
 Package rotoslog provides a [slog.Handler] implementation that writes to a rotating set of files.
 Log file names have the following structure: <prefix>(<suffix>|<timestamp>)<extension>.
 When creating a new handler the user can set various options:
-  - LogDir: directory where log files are created (default "log")
+  - LogDir: directory where log files are created (default: "log")
   - FilePrefix: file name <prefix> (default: "")
-  - CurrentFileSuffix: current file name <suffix>
+  - CurrentFileSuffix: current file name <suffix> (default : "current")
   - DateTimeFormat: timestamp format (default: "20060102150405")
   - MaxFileSize: size threshold that triggers rotation (default: 32M)
   - MaxRotatedFiles: number of rotated files to keep (default: 8)
