@@ -5,114 +5,86 @@
 package rotoslog
 
 import (
-	"context"
+	"bytes"
+	"errors"
+	"fmt"
 	"log/slog"
-	"math/rand"
 	"os"
-	"sync"
+	"strings"
 	"testing"
+	"time"
 )
 
 func init() {
 	os.RemoveAll(defaultConfig.logDir)
-	h, err := NewHandler(MaxRotatedFiles(4))
+}
+
+func countLinesInFile(filename string) (int, error) {
+	lineSep := []byte{'\n'}
+	buf, err := os.ReadFile(filename)
 	if err != nil {
-		panic(err)
+		return 0, err
+	}
+	return bytes.Count(buf, lineSep), nil
+}
+
+const (
+	EXPECTED_NUMBER_OF_FILES = 3
+	EXPECTED_LINE_NUMBER     = 32
+)
+
+func checkResults(h handler) error {
+	entries, err := os.ReadDir(h.cnf.logDir)
+	if err != nil {
+		return err
+	}
+	var n uint64
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), h.cnf.filePrefix) {
+			continue
+		}
+		n++
+		path := h.cnf.filePath(entry.Name())
+		l, err := countLinesInFile(path)
+		if err != nil {
+			return err
+		}
+		if l != EXPECTED_LINE_NUMBER {
+			return fmt.Errorf("%s has the wrong number of lines: got %d, expected %d", path, l, EXPECTED_LINE_NUMBER)
+		}
+	}
+	if n != EXPECTED_NUMBER_OF_FILES {
+		return errors.New("too many log files")
+	}
+	return nil
+}
+
+func TestHandler(t *testing.T) {
+	h, err := NewHandler(
+		FilePrefix("test-"),
+		CurrentFileSuffix("active"),
+		FileExt(".txt"),
+		DateTimeLayout(time.StampNano),
+		MaxFileSize(2048),
+		HandlerOptions(slog.HandlerOptions{Level: slog.LevelDebug}),
+		MaxRotatedFiles(EXPECTED_NUMBER_OF_FILES-1),
+		LogHandlerBuilder(NewTextHandler),
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
 	logger := slog.New(h)
-	slog.SetDefault(logger)
-}
 
-func randomLevel() slog.Level {
-	const min = -1
-	const max = 2
-	return slog.Level(4 * (rand.Intn(max-min+1) + min))
-}
-
-func BenchmarkLog(b *testing.B) {
-	ctx := context.TODO()
-	logger := slog.Default().With("N", b.N)
-	for n := 0; n < b.N; n++ {
-		l := randomLevel()
-		logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
-	}
-}
-
-func BenchmarkParallelLog(b *testing.B) {
-	ctx := context.TODO()
-	logger := slog.Default().With("N", b.N)
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			l := randomLevel()
-			logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
-		}
-	})
-}
-
-func parallelLog(k, n int) {
-	if n <= 0 {
-		return
+	n := (EXPECTED_NUMBER_OF_FILES + 1) * 32 / 4
+	for i := 0; i < n; i++ {
+		logger.Debug("dbg msg", "i", i)
+		logger.Info("nfo msg", "i", i)
+		logger.Warn("wrn msg", "i", i)
+		logger.Error("err msg", "i", i)
 	}
 
-	var wg sync.WaitGroup
-
-	q := n / k
-	r := n % k
-	i := 0
-	for ; i < k && q > 0; i++ {
-		wg.Add(1)
-		i := i
-		go func() {
-			defer wg.Done()
-			logger := slog.Default().With("i", i, "q", q)
-			ctx := context.TODO()
-			for j := 0; j < q; j++ {
-				l := randomLevel()
-				logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
-			}
-		}()
-	}
-	if r > 0 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			logger := slog.Default().With("i", i, "r", r)
-			ctx := context.TODO()
-			for j := 0; j < r; j++ {
-				l := randomLevel()
-				logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func BenchmarkParallelLog1(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		parallelLog(1, 256)
-	}
-}
-
-func BenchmarkParallelLog2(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		parallelLog(2, 256)
-	}
-}
-
-func BenchmarkParallelLog4(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		parallelLog(4, 256)
-	}
-}
-
-func BenchmarkParallelLog8(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		parallelLog(8, 256)
-	}
-}
-
-func BenchmarkParallelLog16(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		parallelLog(16, 256)
+	err = checkResults(h.(handler))
+	if err != nil {
+		t.Fatal(err)
 	}
 }

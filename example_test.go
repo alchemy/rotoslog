@@ -9,14 +9,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"testing"
 
 	formatter "github.com/samber/slog-formatter"
 )
 
-func setup() {
-	os.RemoveAll(defaultConfig.logDir)
+func ExampleFormatter() {
+	const N = 10
+
 	formatter1 := formatter.FormatByKey("pwd", func(v slog.Value) slog.Value {
 		return slog.StringValue("***********")
 	})
@@ -31,22 +31,21 @@ func setup() {
 	if err != nil {
 		panic(err)
 	}
-	logger := slog.New(h)
+	logger := slog.New(h).With("N", N, "pwd", "123456")
 	slog.SetDefault(logger)
-}
-
-func BenchmarkFormatter(b *testing.B) {
-	setup()
 
 	ctx := context.TODO()
-	logger := slog.Default().With("N", b.N, "pwd", "123456")
-	for n := 0; n < b.N; n++ {
+	for n := 0; n < N; n++ {
 		l := randomLevel()
 		if l == slog.LevelError {
 			err := fmt.Errorf("random error n° %d", n)
-			logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino", "error", err)
+			slog.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino", "error", err)
 			continue
 		}
-		logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
+		slog.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
 	}
+}
+
+func TestExamples(t *testing.T) {
+	ExampleFormatter()
 }

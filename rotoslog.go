@@ -9,7 +9,8 @@ When creating a new handler the user can set various options:
   - [LogDir]: directory where log files are created (default: "log")
   - [FilePrefix]: file name <prefix> (default: "")
   - [CurrentFileSuffix]: current file name <suffix> (default : "current")
-  - [DateTimeLayout]: timestamp layout to be used in calls to [time.Time.Format] (default: "20060102150405")
+  - [FileExt]: file <extension> (default: ".log")
+  - [DateTimeLayout]: <timestamp> layout to be used in calls to [time.Time.Format] (default: "20060102150405")
   - [MaxFileSize]: size threshold that triggers rotation (default: 32M)
   - [MaxRotatedFiles]: number of rotated files to keep (default: 8)
   - [HandlerOptions]: [slog.HandlerOptions] (default: zero value)
@@ -110,6 +111,13 @@ func FilePrefix(prefix string) optFun {
 func CurrentFileSuffix(suffix string) optFun {
 	return func(cnf *config) {
 		cnf.currentFileSuffix = suffix
+	}
+}
+
+// FileExt sets the log file extension.
+func FileExt(ext string) optFun {
+	return func(cnf *config) {
+		cnf.fileExtension = ext
 	}
 }
 
@@ -241,7 +249,7 @@ func (h handler) Handle(ctx context.Context, r slog.Record) error {
 			return err
 		}
 
-		err = h.rotateLogFiles()
+		err = h.searchAndRemoveOldestFile()
 		if err != nil {
 			return err
 		}
@@ -256,7 +264,7 @@ func (h handler) Handle(ctx context.Context, r slog.Record) error {
 	return h.formatter.Handle(ctx, r)
 }
 
-func (h *handler) rotateLogFiles() error {
+func (h *handler) searchAndRemoveOldestFile() error {
 	entries, err := os.ReadDir(h.cnf.logDir)
 	if err != nil {
 		return err
