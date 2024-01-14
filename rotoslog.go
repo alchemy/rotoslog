@@ -51,7 +51,7 @@ type config struct {
 	maxFileSize       uint64
 	maxRotatedFiles   uint64
 	handlerOptions    slog.HandlerOptions
-	builder           HandlerBuilder
+	builder           builder
 	_currentFilePath  string
 }
 
@@ -88,7 +88,9 @@ var defaultConfig = config{
 	maxFileSize:       DEFAULT_MAX_FILE_SIZE,
 	maxRotatedFiles:   DEFAULT_MAX_ROTATED_FILES,
 	handlerOptions:    slog.HandlerOptions{},
-	builder:           NewJSONHandler,
+	builder: func(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
+		return slog.NewJSONHandler(w, opts)
+	},
 }
 
 type optFun func(*config)
@@ -152,22 +154,15 @@ func HandlerOptions(opts slog.HandlerOptions) optFun {
 
 // HandlerBuilder is a type representing functions used to create
 // handlers to control formatting of logging data.
-type HandlerBuilder func(w io.Writer, opts *slog.HandlerOptions) slog.Handler
-
-// NewJSONHandler is a HandlerBuilder that creates a slog.JSONHandler.
-func NewJSONHandler(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
-	return slog.NewJSONHandler(w, opts)
-}
-
-// NewTestHandler is a HandlerBuilder that creates a slog.TextHandler.
-func NewTextHandler(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
-	return slog.NewTextHandler(w, opts)
-}
+type HandlerBuilder[H slog.Handler] func(w io.Writer, opts *slog.HandlerOptions) H
+type builder func(w io.Writer, opts *slog.HandlerOptions) slog.Handler
 
 // LogHandlerBuilder sets the HandlerBuilder used for formatting.
-func LogHandlerBuilder(builder HandlerBuilder) optFun {
+func LogHandlerBuilder[H slog.Handler](builder HandlerBuilder[H]) optFun {
 	return func(cnf *config) {
-		cnf.builder = builder
+		cnf.builder = func(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
+			return builder(w, opts)
+		}
 	}
 }
 

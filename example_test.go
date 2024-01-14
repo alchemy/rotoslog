@@ -24,7 +24,7 @@ func ExampleFormatter() {
 
 	builder := func(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
 		formattingMiddleware := formatter.NewFormatterHandler(formatter1, formatter2)
-		textHandler := NewTextHandler(w, opts)
+		textHandler := slog.NewTextHandler(w, opts)
 		return formattingMiddleware(textHandler)
 	}
 	h, err := NewHandler(LogHandlerBuilder(builder))

@@ -6,13 +6,11 @@ package rotoslog
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 func init() {
@@ -54,7 +52,7 @@ func checkResults(h handler) error {
 		}
 	}
 	if n != EXPECTED_NUMBER_OF_FILES {
-		return errors.New("too many log files")
+		return fmt.Errorf("wrong number of log files, got %d, expected %d", n, EXPECTED_NUMBER_OF_FILES)
 	}
 	return nil
 }
@@ -64,11 +62,11 @@ func TestHandler(t *testing.T) {
 		FilePrefix("test-"),
 		CurrentFileSuffix("active"),
 		FileExt(".txt"),
-		DateTimeLayout(time.StampNano),
+		DateTimeLayout("20060102150405.000000000"),
 		MaxFileSize(2048),
 		HandlerOptions(slog.HandlerOptions{Level: slog.LevelDebug}),
 		MaxRotatedFiles(EXPECTED_NUMBER_OF_FILES-1),
-		LogHandlerBuilder(NewTextHandler),
+		LogHandlerBuilder(slog.NewTextHandler),
 	)
 	if err != nil {
 		t.Fatal(err)
