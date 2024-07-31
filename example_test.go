@@ -2,19 +2,27 @@
 // Use of this source code is governed by the MIT
 // license that can be found in the LICENSE file.
 
-package rotoslog
+package rotoslog_test
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"testing"
 
+	"github.com/alchemy/rotoslog"
 	formatter "github.com/samber/slog-formatter"
 )
 
-func ExampleFormatter() {
+func randomLevel() slog.Level {
+	const min = -1
+	const max = 2
+	return slog.Level(4 * (rand.Intn(max-min+1) + min))
+}
+
+func ExampleLogHandlerBuilder() {
 	const N = 10
 
 	formatter1 := formatter.FormatByKey("pwd", func(v slog.Value) slog.Value {
@@ -27,7 +35,7 @@ func ExampleFormatter() {
 		textHandler := slog.NewTextHandler(w, opts)
 		return formattingMiddleware(textHandler)
 	}
-	h, err := NewHandler(LogHandlerBuilder(builder))
+	h, err := rotoslog.NewHandler(rotoslog.LogHandlerBuilder(builder))
 	if err != nil {
 		panic(err)
 	}
@@ -46,6 +54,10 @@ func ExampleFormatter() {
 	}
 }
 
+func ExampleNewHandler() {
+
+}
+
 func TestExamples(t *testing.T) {
-	ExampleFormatter()
+	ExampleLogHandlerBuilder()
 }

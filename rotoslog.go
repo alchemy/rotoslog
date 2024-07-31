@@ -32,6 +32,13 @@ import (
 )
 
 const (
+	maxUint64 = ^uint64(0)
+	minUint64 = 0
+	maxInt64  = int64(maxUint64 >> 1)
+	minInt64  = -maxInt64 - 1
+)
+
+const (
 	DEFAULT_FILE_DIR            = "log"
 	DEFAULT_FILE_NAME_PREFIX    = ""
 	DEFAULT_CURRENT_FILE_SUFFIX = "current"
@@ -40,6 +47,7 @@ const (
 	DEFAULT_FILE_DATE_FORMAT    = "20060102150405"
 	DEFAULT_MAX_FILE_SIZE       = 32 * 1024 * 1024
 	DEFAULT_MAX_ROTATED_FILES   = 8
+	DEFAULT_MAX_AGE             = time.Duration(maxInt64)
 )
 
 type config struct {
@@ -51,7 +59,7 @@ type config struct {
 	maxFileSize       uint64
 	maxRotatedFiles   uint64
 	handlerOptions    slog.HandlerOptions
-	builder           builder
+	builder           handlerBuilder
 	_currentFilePath  string
 }
 
@@ -131,6 +139,7 @@ func DateTimeLayout(layout string) optFun {
 }
 
 // MaxFileSize sets the size threshold that triggers file rotation.
+// If size is 0 file rotation is disabled.
 func MaxFileSize(size uint64) optFun {
 	return func(cnf *config) {
 		cnf.maxFileSize = size
@@ -138,9 +147,14 @@ func MaxFileSize(size uint64) optFun {
 }
 
 // MaxRotatedFiles sets the maximum number of rotated files.
-// When this number is exceeded the oldest rotated fle is deleted.
+// When the number of rotated files exceedes this number the
+// oldest rotated file is deleted.
+// Any value of n less than 1 is equivalent to passing 1.
 func MaxRotatedFiles(n uint64) optFun {
 	return func(cnf *config) {
+		if n < 1 {
+			n = 1
+		}
 		cnf.maxRotatedFiles = n
 	}
 }
@@ -155,7 +169,7 @@ func HandlerOptions(opts slog.HandlerOptions) optFun {
 // HandlerBuilder is a type representing functions used to create
 // handlers to control formatting of logging data.
 type HandlerBuilder[H slog.Handler] func(w io.Writer, opts *slog.HandlerOptions) H
-type builder func(w io.Writer, opts *slog.HandlerOptions) slog.Handler
+type handlerBuilder func(w io.Writer, opts *slog.HandlerOptions) slog.Handler
 
 // LogHandlerBuilder sets the HandlerBuilder used for formatting.
 func LogHandlerBuilder[H slog.Handler](builder HandlerBuilder[H]) optFun {
@@ -220,19 +234,13 @@ func (h handler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle implements the method of the slog.Handler interface.
 func (h handler) Handle(ctx context.Context, r slog.Record) error {
-	if !h.Enabled(ctx, r.Level) {
-		return nil
+	if h.cnf.maxFileSize <= 0 {
+		return h.formatter.Handle(ctx, r)
 	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	// info, err := h.logFile.Stat()
-	// if err != nil {
-	// 	return err
-	// }
-	// if h.logFile.Size() != info.Size() {
-	// 	panic(fmt.Errorf("calculated size (%d) differs from actual size (%d)", h.logFile.Size(), info.Size()))
-	// }
+
 	if h.w.Size() > int64(h.cnf.maxFileSize) {
 		err := h.w.Close()
 		if err != nil {
@@ -248,7 +256,6 @@ func (h handler) Handle(ctx context.Context, r slog.Record) error {
 		if err != nil {
 			return err
 		}
-		//go h.rotateLogFiles()
 
 		err = h.openLogFile()
 		if err != nil {

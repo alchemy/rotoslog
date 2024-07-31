@@ -13,7 +13,7 @@ import (
 )
 
 func getLogger() *slog.Logger {
-	h, err := NewHandler(MaxRotatedFiles(4), LogHandlerBuilder(slog.NewTextHandler))
+	h, err := NewHandler(MaxRotatedFiles(1), LogHandlerBuilder(slog.NewTextHandler))
 	if err != nil {
 		panic(err)
 	}
