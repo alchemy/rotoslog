@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/alchemy/rotoslog"
@@ -55,7 +56,24 @@ func ExampleLogHandlerBuilder() {
 }
 
 func ExampleNewHandler() {
+	dir, err := os.MkdirTemp("", "rotoslog-example-")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
 
+	h, err := rotoslog.NewHandler(
+		rotoslog.LogDir(dir),
+		rotoslog.FilePrefix("app-"),
+		rotoslog.LogHandlerBuilder(slog.NewTextHandler),
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer h.Close()
+
+	logger := slog.New(h)
+	logger.Info("started", "component", "example")
 }
 
 func TestExamples(t *testing.T) {

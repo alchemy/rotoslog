@@ -4,15 +4,16 @@ rotoslog
 This package implements a simple log file rotator handler for slog.
 It works out of the box using the standard JSONHandler (default) and
 TextHandler for output formatting, but supports custom handlers.
+The handler returned by `NewHandler` also implements `io.Closer`.
 
 Example using default configuration:
 ```go
 package main
 
 import (
-    "log/slog"
+	"log/slog"
 
-    "github/alchemy/rotoslog"
+	"github.com/alchemy/rotoslog"
 )
 
 func init() {
@@ -20,6 +21,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	defer h.Close()
 	logger := slog.New(h)
 	slog.SetDefault(logger)
 }
@@ -30,13 +32,10 @@ Example using custom slog-formatter handler:
 package main
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"testing"
 
-    "github/alchemy/rotoslog"
+	"github.com/alchemy/rotoslog"
 
 	formatter "github.com/samber/slog-formatter"
 )
@@ -49,13 +48,14 @@ func init() {
 
 	builder := func(w io.Writer, opts *slog.HandlerOptions) slog.Handler {
 		formattingMiddleware := formatter.NewFormatterHandler(formatter1, formatter2)
-		textHandler := NewTextHandler(w, opts)
+		textHandler := slog.NewTextHandler(w, opts)
 		return formattingMiddleware(textHandler)
 	}
-	h, err := rotoslog.NewHandler(rotoslog.HandlerBuilder(builder))
+	h, err := rotoslog.NewHandler(rotoslog.LogHandlerBuilder(builder))
 	if err != nil {
 		panic(err)
 	}
+	defer h.Close()
 	logger := slog.New(h)
 	slog.SetDefault(logger)
 }

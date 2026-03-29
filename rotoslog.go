@@ -10,20 +10,22 @@ When creating a new handler the user can set various options:
   - [FilePrefix]: file name <prefix> (default: "")
   - [CurrentFileSuffix]: current file name <suffix> (default : "current")
   - [FileExt]: file <extension> (default: ".log")
-  - [DateTimeLayout]: <timestamp> layout to be used in calls to [time.Time.Format] (default: "20060102150405")
+  - [DateTimeLayout]: <timestamp> layout to be used in calls to [time.Time.Format] (default: "20060102150405.000000000")
   - [MaxFileSize]: size threshold that triggers rotation (default: 32M)
   - [MaxRotatedFiles]: number of rotated files to keep (default: 8)
   - [HandlerOptions]: [slog.HandlerOptions] (default: zero value)
   - [LogHandlerBuilder]: a function that can build a slog.Handler used for formatting log data (default: [NewJSONHandler])
+
+The returned [Handler] also implements [io.Closer].
 */
 package rotoslog
 
 import (
 	"context"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,22 +34,14 @@ import (
 )
 
 const (
-	maxUint64 = ^uint64(0)
-	minUint64 = 0
-	maxInt64  = int64(maxUint64 >> 1)
-	minInt64  = -maxInt64 - 1
-)
-
-const (
 	DEFAULT_FILE_DIR            = "log"
 	DEFAULT_FILE_NAME_PREFIX    = ""
 	DEFAULT_CURRENT_FILE_SUFFIX = "current"
 	DEFAULT_FILE_EXTENSION      = ".log"
 	DEFAULT_CURRENT_FILE_NAME   = DEFAULT_FILE_NAME_PREFIX + DEFAULT_CURRENT_FILE_SUFFIX + DEFAULT_FILE_EXTENSION
-	DEFAULT_FILE_DATE_FORMAT    = "20060102150405"
+	DEFAULT_FILE_DATE_FORMAT    = "20060102150405.000000000"
 	DEFAULT_MAX_FILE_SIZE       = 32 * 1024 * 1024
 	DEFAULT_MAX_ROTATED_FILES   = 8
-	DEFAULT_MAX_AGE             = time.Duration(maxInt64)
 )
 
 type config struct {
@@ -180,7 +174,9 @@ func LogHandlerBuilder[H slog.Handler](builder HandlerBuilder[H]) optFun {
 	}
 }
 
-type handler struct {
+// Handler is a slog.Handler implementation that writes to rotating log files.
+// It also implements io.Closer.
+type Handler struct {
 	w         *logFile
 	formatter slog.Handler
 	cnf       config
@@ -188,8 +184,8 @@ type handler struct {
 }
 
 // NewHandler creates a new handler with the given options.
-func NewHandler(options ...optFun) (slog.Handler, error) {
-	h := handler{
+func NewHandler(options ...optFun) (*Handler, error) {
+	h := Handler{
 		cnf: defaultConfig,
 		mu:  &sync.Mutex{},
 		w:   &logFile{},
@@ -206,15 +202,15 @@ func NewHandler(options ...optFun) (slog.Handler, error) {
 		return nil, err
 	}
 	h.formatter = h.cnf.builder(h.w, &h.cnf.handlerOptions)
-	return h, nil
+	return &h, nil
 }
 
-func (h *handler) mkLogDir() error {
+func (h *Handler) mkLogDir() error {
 	path := h.cnf.currentFilePath()
 	return os.MkdirAll(filepath.Dir(path), 0755)
 }
 
-func (h *handler) openLogFile() error {
+func (h *Handler) openLogFile() error {
 	path := h.cnf.currentFilePath()
 
 	// If the log file doesn't exist, create it, or append to the file
@@ -228,12 +224,12 @@ func (h *handler) openLogFile() error {
 
 // Enabled implements the method of the slog.Handler interface
 // by calling the same method of the formatter habdler.
-func (h handler) Enabled(ctx context.Context, level slog.Level) bool {
+func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.formatter.Enabled(ctx, level)
 }
 
 // Handle implements the method of the slog.Handler interface.
-func (h handler) Handle(ctx context.Context, r slog.Record) error {
+func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	if h.cnf.maxFileSize <= 0 {
 		return h.formatter.Handle(ctx, r)
 	}
@@ -241,23 +237,8 @@ func (h handler) Handle(ctx context.Context, r slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.w.Size() > int64(h.cnf.maxFileSize) {
-		err := h.w.Close()
-		if err != nil {
-			return err
-		}
-		rotatedFilePath := h.cnf.rotatedFilePath(time.Now())
-		err = os.Rename(h.cnf.currentFilePath(), rotatedFilePath)
-		if err != nil {
-			return err
-		}
-
-		err = h.searchAndRemoveOldestFile()
-		if err != nil {
-			return err
-		}
-
-		err = h.openLogFile()
+	if h.w.Size() >= int64(h.cnf.maxFileSize) {
+		err := h.rotate(time.Now())
 		if err != nil {
 			return err
 		}
@@ -266,50 +247,113 @@ func (h handler) Handle(ctx context.Context, r slog.Record) error {
 	return h.formatter.Handle(ctx, r)
 }
 
-func (h *handler) searchAndRemoveOldestFile() error {
+// Close closes the current log file. Further writes return an error.
+func (h *Handler) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.w.Close()
+}
+
+func (h *Handler) rotate(now time.Time) error {
+	if err := h.w.Close(); err != nil {
+		return err
+	}
+	rotatedFilePath, err := h.nextRotatedFilePath(now)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(h.cnf.currentFilePath(), rotatedFilePath); err != nil {
+		return err
+	}
+	if err := h.cleanupRotatedFiles(); err != nil {
+		return err
+	}
+	return h.openLogFile()
+}
+
+func (h *Handler) nextRotatedFilePath(now time.Time) (string, error) {
+	for seq := 0; ; seq++ {
+		path := h.cnf.filePath(h.rotatedFileName(now, seq))
+		_, err := os.Stat(path)
+		if err == nil {
+			continue
+		}
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", err
+	}
+}
+
+func (h *Handler) rotatedFileName(ts time.Time, seq int) string {
+	base := h.cnf.rotatedFileName(ts)
+	if seq == 0 {
+		return base
+	}
+	return strings.TrimSuffix(base, h.cnf.fileExtension) + "-" + strconv.Itoa(seq) + h.cnf.fileExtension
+}
+
+func (h *Handler) cleanupRotatedFiles() error {
 	entries, err := os.ReadDir(h.cnf.logDir)
 	if err != nil {
 		return err
 	}
-	var n uint64
-	var oldestEntry fs.DirEntry
+
+	var count int
+	var oldestName string
+	var oldestTS time.Time
+	var oldestSeq int
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), h.cnf.filePrefix) {
+		ts, seq, ok := h.parseRotatedFileName(entry.Name())
+		if !ok {
 			continue
 		}
-		n++
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		if oldestEntry == nil {
-			oldestEntry = entry
-			continue
-		}
-
-		oldestInfo, err := oldestEntry.Info()
-		if err != nil {
-			return err
-		}
-
-		if info.ModTime().Before(oldestInfo.ModTime()) {
-			oldestEntry = entry
+		count++
+		if oldestName == "" || ts.Before(oldestTS) || (ts.Equal(oldestTS) && seq < oldestSeq) {
+			oldestName = entry.Name()
+			oldestTS = ts
+			oldestSeq = seq
 		}
 	}
 
-	if n > h.cnf.maxRotatedFiles {
-		oldestFileName := h.cnf.filePath(oldestEntry.Name())
-		err = os.Remove(oldestFileName)
-		if err != nil {
-			return err
-		}
+	limit := int(h.cnf.maxRotatedFiles)
+	if count <= limit {
+		return nil
 	}
-	return nil
+	if oldestName == "" {
+		return nil
+	}
+	return os.Remove(h.cnf.filePath(oldestName))
 }
 
-func (h handler) clone() *handler {
-	return &handler{
+func (h *Handler) parseRotatedFileName(name string) (time.Time, int, bool) {
+	if name == h.cnf.currentFileName() {
+		return time.Time{}, 0, false
+	}
+	if !strings.HasPrefix(name, h.cnf.filePrefix) || !strings.HasSuffix(name, h.cnf.fileExtension) {
+		return time.Time{}, 0, false
+	}
+
+	stem := strings.TrimSuffix(strings.TrimPrefix(name, h.cnf.filePrefix), h.cnf.fileExtension)
+	seq := 0
+	tsStem := stem
+	if sep := strings.LastIndex(stem, "-"); sep >= 0 {
+		parsedSeq, err := strconv.Atoi(stem[sep+1:])
+		if err == nil {
+			seq = parsedSeq
+			tsStem = stem[:sep]
+		}
+	}
+
+	ts, err := time.Parse(h.cnf.dateTimeLayout, tsStem)
+	if err != nil {
+		return time.Time{}, 0, false
+	}
+	return ts, seq, true
+}
+
+func (h *Handler) clone() *Handler {
+	return &Handler{
 		formatter: h.formatter,
 		cnf:       h.cnf,
 		mu:        h.mu,
@@ -320,7 +364,7 @@ func (h handler) clone() *handler {
 // WithAttrs implements the method of the slog.Handler interface by
 // cloning the current handler and calling the WithAttrs of the
 // formatter handler.
-func (h handler) WithAttrs(attr []slog.Attr) slog.Handler {
+func (h *Handler) WithAttrs(attr []slog.Attr) slog.Handler {
 	nh := h.clone()
 	nh.formatter = h.formatter.WithAttrs(attr)
 	return nh
@@ -329,7 +373,7 @@ func (h handler) WithAttrs(attr []slog.Attr) slog.Handler {
 // WithGroup implements the method of the slog.Handler interface by
 // cloning the current handler and calling the WithGroup of the
 // formatter handler.
-func (h handler) WithGroup(name string) slog.Handler {
+func (h *Handler) WithGroup(name string) slog.Handler {
 	nh := h.clone()
 	nh.formatter = h.formatter.WithGroup(name)
 	return nh

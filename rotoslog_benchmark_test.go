@@ -8,12 +8,21 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"path/filepath"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
-func getLogger() *slog.Logger {
-	h, err := NewHandler(MaxRotatedFiles(1), LogHandlerBuilder(slog.NewTextHandler))
+var benchmarkRunID atomic.Uint64
+
+func getLogger(dir string) *slog.Logger {
+	h, err := NewHandler(
+		LogDir(dir),
+		MaxRotatedFiles(1),
+		LogHandlerBuilder(slog.NewTextHandler),
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -28,7 +37,7 @@ func randomLevel() slog.Level {
 
 func BenchmarkLog(b *testing.B) {
 	ctx := context.TODO()
-	logger := getLogger().With("N", b.N)
+	logger := getLogger(b.TempDir()).With("N", b.N)
 	for n := 0; n < b.N; n++ {
 		l := randomLevel()
 		logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
@@ -37,7 +46,7 @@ func BenchmarkLog(b *testing.B) {
 
 func BenchmarkParallelLog(b *testing.B) {
 	ctx := context.TODO()
-	logger := getLogger().With("N", b.N)
+	logger := getLogger(b.TempDir()).With("N", b.N)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			l := randomLevel()
@@ -46,12 +55,13 @@ func BenchmarkParallelLog(b *testing.B) {
 	})
 }
 
-func parallelLog(k, n int) {
+func parallelLog(rootDir string, k, n int) {
 	if n <= 0 {
 		return
 	}
 
 	var wg sync.WaitGroup
+	runDir := filepath.Join(rootDir, strconv.FormatUint(benchmarkRunID.Add(1), 10))
 
 	q := n / k
 	r := n % k
@@ -61,7 +71,8 @@ func parallelLog(k, n int) {
 		i := i
 		go func() {
 			defer wg.Done()
-			logger := getLogger().With("i", i, "q", q)
+			loggerDir := filepath.Join(runDir, strconv.Itoa(i))
+			logger := getLogger(loggerDir).With("i", i, "q", q)
 			ctx := context.TODO()
 			for j := 0; j < q; j++ {
 				l := randomLevel()
@@ -73,7 +84,8 @@ func parallelLog(k, n int) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			logger := getLogger().With("i", i, "r", r)
+			loggerDir := filepath.Join(runDir, strconv.Itoa(i))
+			logger := getLogger(loggerDir).With("i", i, "r", r)
 			ctx := context.TODO()
 			for j := 0; j < r; j++ {
 				l := randomLevel()
@@ -85,31 +97,57 @@ func parallelLog(k, n int) {
 }
 
 func BenchmarkParallelLog1(b *testing.B) {
+	rootDir := b.TempDir()
 	for n := 0; n < b.N; n++ {
-		parallelLog(1, 256)
+		parallelLog(rootDir, 1, 256)
 	}
 }
 
 func BenchmarkParallelLog2(b *testing.B) {
+	rootDir := b.TempDir()
 	for n := 0; n < b.N; n++ {
-		parallelLog(2, 256)
+		parallelLog(rootDir, 2, 256)
 	}
 }
 
 func BenchmarkParallelLog4(b *testing.B) {
+	rootDir := b.TempDir()
 	for n := 0; n < b.N; n++ {
-		parallelLog(4, 256)
+		parallelLog(rootDir, 4, 256)
 	}
 }
 
 func BenchmarkParallelLog8(b *testing.B) {
+	rootDir := b.TempDir()
 	for n := 0; n < b.N; n++ {
-		parallelLog(8, 256)
+		parallelLog(rootDir, 8, 256)
 	}
 }
 
 func BenchmarkParallelLog16(b *testing.B) {
+	rootDir := b.TempDir()
 	for n := 0; n < b.N; n++ {
-		parallelLog(16, 256)
+		parallelLog(rootDir, 16, 256)
+	}
+}
+
+func BenchmarkRotateHeavy(b *testing.B) {
+	ctx := context.TODO()
+	h, err := NewHandler(
+		LogDir(b.TempDir()),
+		MaxFileSize(256),
+		MaxRotatedFiles(4),
+		LogHandlerBuilder(slog.NewTextHandler),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer h.Close()
+
+	logger := slog.New(h).With("N", b.N)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		l := randomLevel()
+		logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
 	}
 }
