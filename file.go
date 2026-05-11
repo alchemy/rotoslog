@@ -5,7 +5,6 @@
 package rotoslog
 
 import (
-	"errors"
 	"io/fs"
 	"os"
 )
@@ -45,7 +44,7 @@ func (f *logFile) Close() (err error) {
 
 func (f *logFile) Stat() (info fs.FileInfo, err error) {
 	if f.file == nil {
-		return nil, errors.New("log file is closed")
+		return nil, fs.ErrClosed
 	}
 	info, err = f.file.Stat()
 	return
@@ -53,7 +52,7 @@ func (f *logFile) Stat() (info fs.FileInfo, err error) {
 
 func (f *logFile) Write(p []byte) (n int, err error) {
 	if f.file == nil {
-		return 0, errors.New("log file is closed")
+		return 0, fs.ErrClosed
 	}
 	n, err = f.file.Write(p)
 	f.size += int64(n)

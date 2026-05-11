@@ -21,11 +21,11 @@
 # Go workspace file
 go.work
 
+*.log
+*.resume
 log.json
 log/
 build/
 test/
 dist/
 .vscode/
-
-*.creds
