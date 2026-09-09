@@ -76,6 +76,63 @@ func ExampleNewHandler() {
 	logger.Info("started", "component", "example")
 }
 
+// ExampleAutoRotate shows the development half of a typical pair of
+// configurations: each run starts a fresh log file, and a run long enough to
+// cross an hour boundary is split there too. In production the same program
+// would keep the size and retention options but ask only for
+// rotoslog.AutoRotate(rotoslog.Monthly).
+func ExampleAutoRotate() {
+	dir, err := os.MkdirTemp("", "rotoslog-autorotate-")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Two runs of the same program, sharing one log directory.
+	run := func(message string) {
+		h, err := rotoslog.NewHandler(
+			rotoslog.LogDir(dir),
+			rotoslog.FilePrefix("app-"),
+			// One file per hour, so name the rotated files for the hour.
+			rotoslog.DateTimeLayout("2006-01-02T15"),
+			rotoslog.MaxFileSize(1024*1024),
+			rotoslog.MaxRotatedFiles(4),
+			rotoslog.AutoRotate(rotoslog.OnStart, rotoslog.Hourly),
+			rotoslog.LogHandlerBuilder(slog.NewTextHandler),
+		)
+		if err != nil {
+			panic(err)
+		}
+		defer h.Close()
+
+		slog.New(h).Info(message)
+	}
+
+	run("first run")
+	// OnStart moves the first run's log aside, so the two runs never share a
+	// file even though neither of them filled one or crossed an hour.
+	run("second run")
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	// The live file keeps a fixed name, <prefix>current<ext>; the run that was
+	// moved aside is named for the hour it holds.
+	var rotated int
+	for _, entry := range entries {
+		if entry.Name() != "app-current.log" {
+			rotated++
+		}
+	}
+	fmt.Printf("%d files: the current log plus %d rotated\n", len(entries), rotated)
+
+	// Output:
+	// 2 files: the current log plus 1 rotated
+}
+
 func TestExamples(t *testing.T) {
 	ExampleLogHandlerBuilder()
+	ExampleNewHandler()
+	ExampleAutoRotate()
 }

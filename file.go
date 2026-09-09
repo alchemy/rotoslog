@@ -7,11 +7,19 @@ package rotoslog
 import (
 	"io/fs"
 	"os"
+	"time"
 )
 
 type logFile struct {
 	file *os.File
 	size int64
+	// lastWrite is when the file last received a complete log record. It is
+	// the reference point for calendar rotation, which needs it on every
+	// message and so cannot afford to stat the file for it; the handler stamps
+	// it with the timestamp it already reads to test the triggers. Open seeds
+	// it from the modification time, so a file inherited from an earlier run
+	// keeps its age.
+	lastWrite time.Time
 }
 
 func (f *logFile) Open(name string, flag int, perm os.FileMode) (err error) {
@@ -29,6 +37,7 @@ func (f *logFile) Open(name string, flag int, perm os.FileMode) (err error) {
 		return err
 	}
 	f.size = info.Size()
+	f.lastWrite = info.ModTime()
 	return nil
 }
 
@@ -39,6 +48,7 @@ func (f *logFile) Close() (err error) {
 	err = f.file.Close()
 	f.file = nil
 	f.size = 0
+	f.lastWrite = time.Time{}
 	return
 }
 
@@ -61,4 +71,12 @@ func (f *logFile) Write(p []byte) (n int, err error) {
 
 func (f *logFile) Size() int64 {
 	return f.size
+}
+
+func (f *logFile) ModTime() (time.Time, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
 }

@@ -17,12 +17,12 @@ import (
 
 var benchmarkRunID atomic.Uint64
 
-func getLogger(dir string) *slog.Logger {
-	h, err := NewHandler(
+func getLogger(dir string, options ...optFun) *slog.Logger {
+	h, err := NewHandler(append([]optFun{
 		LogDir(dir),
 		MaxRotatedFiles(1),
 		LogHandlerBuilder(slog.NewTextHandler),
-	)
+	}, options...)...)
 	if err != nil {
 		panic(err)
 	}
@@ -38,6 +38,17 @@ func randomLevel() slog.Level {
 func BenchmarkLog(b *testing.B) {
 	ctx := context.TODO()
 	logger := getLogger(b.TempDir()).With("N", b.N)
+	for n := 0; n < b.N; n++ {
+		l := randomLevel()
+		logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
+	}
+}
+
+// BenchmarkLogHourly is BenchmarkLog with a calendar trigger enabled, so the
+// two measure the per-message cost of AutoRotate against the same workload.
+func BenchmarkLogHourly(b *testing.B) {
+	ctx := context.TODO()
+	logger := getLogger(b.TempDir(), AutoRotate(Hourly)).With("N", b.N)
 	for n := 0; n < b.N; n++ {
 		l := randomLevel()
 		logger.Log(ctx, l, "tanto va la gatta al lardo che ci lascia lo zampino")
